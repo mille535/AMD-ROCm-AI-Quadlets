@@ -1,0 +1,19 @@
+[Unit]
+Description=SearXNG search engine (web search backend for Open WebUI)
+After=ai-stack-network.service
+
+[Container]
+Image=docker.io/searxng/searxng:latest
+AutoUpdate=registry
+ContainerName=searxng
+Network=ai-stack.network
+
+Volume=%h/ai-stack/searxng:/etc/searxng:Z
+
+PublishPort=8080:8080
+
+[Service]
+Restart=always
+
+# [Install]
+# WantedBy=default.target

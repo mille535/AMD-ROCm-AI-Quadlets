@@ -1,0 +1,40 @@
+[Unit]
+Description=ComfyUI image generation
+After=ai-stack-network.service
+
+[Container]
+Image=docker.io/yanwk/comfyui-boot:rocm7
+AutoUpdate=registry
+ContainerName=comfyui
+Network=ai-stack.network
+
+AddDevice=/dev/kfd
+AddDevice=/dev/dri
+GroupAdd=keep-groups
+
+SecurityLabelDisable=true
+SeccompProfile=unconfined
+AddCapability=CAP_SYS_PTRACE
+
+Environment=HSA_OVERRIDE_GFX_VERSION=12.0.1
+# Environment=CLI_ARGS=""
+
+PodmanArgs=--ipc=host
+
+Volume=%h/ai-stack/comfyui/models:/root/ComfyUI/models:Z
+Volume=%h/ai-stack/comfyui/output:/root/ComfyUI/output:Z
+Volume=%h/ai-stack/comfyui/custom_nodes:/root/ComfyUI/custom_nodes:Z
+Volume=%h/ai-stack/comfyui/hf-hub:/root/.cache/huggingface/hub:Z
+Volume=%h/ai-stack/comfyui/torch-hub:/root/.cache/torch/hub:Z
+Volume=%h/ai-stack/comfyui/input:/root/ComfyUI/input:Z
+Volume=%h/ai-stack/comfyui/workflows:/root/ComfyUI/user/default/workflows:Z
+
+PublishPort=8188:8188
+
+[Service]
+Restart=always
+TimeoutStartSec=180
+RestartSec=5
+
+# [Install]
+# WantedBy=default.target

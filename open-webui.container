@@ -1,0 +1,51 @@
+[Unit]
+Description=Open WebUI - chat hub (LLM, search, images, voice)
+After=ai-stack-network.service ollama.service searxng.service speaches.service
+
+[Container]
+Image=ghcr.io/open-webui/open-webui:main
+AutoUpdate=registry
+ContainerName=open-webui
+Network=ai-stack.network
+
+Environment=OLLAMA_BASE_URL=http://ollama:11434
+# Environment=GLOBAL_LOG_LEVEL=DEBUG
+
+Environment=ENABLE_WEB_SEARCH=true
+Environment=WEB_SEARCH_ENGINE=searxng
+Environment=WEB_SEARCH_RESULT_COUNT=3
+Environment=WEB_SEARCH_CONCURRENT_REQUESTS=10
+Environment=SEARXNG_QUERY_URL=http://searxng:8080/search?q=<query>
+
+Environment=ENABLE_IMAGE_GENERATION=true
+Environment=IMAGE_GENERATION_ENGINE=comfyui
+Environment=COMFYUI_BASE_URL=http://comfyui:8188
+# COMFYUI_WORKFLOW (API-format JSON) and the node-ID mappings still need to
+# be set up once through Admin Panel > Settings > Images — see prior message.
+
+# Environment=AUDIO_STT_ENGINE=openai
+Environment=AUDIO_STT_OPENAI_API_BASE_URL=http://speaches:8000/v1
+Environment=AUDIO_STT_OPENAI_API_KEY=not-needed
+Environment=AUDIO_STT_MODEL=Systran/faster-whisper-small
+
+Environment=AUDIO_TTS_ENGINE=openai
+Environment=AUDIO_TTS_OPENAI_API_BASE_URL=http://speaches:8000/v1
+Environment=AUDIO_TTS_OPENAI_API_KEY=not-needed
+Environment=AUDIO_TTS_MODEL=speaches-ai/Kokoro-82M-v1.0-ONNX
+Environment=AUDIO_TTS_VOICE=af_heart
+
+Volume=%h/ai-stack/open-webui:/app/backend/data:Z
+
+PublishPort=3000:8080
+
+[Service]
+Restart=always
+
+# [Install]
+# WantedBy=default.target
+
+# NOTE: microphone-based STT (the mic button) only works over HTTPS or from
+# localhost — plain http://localhost:3000 from other devices will not get 
+# mic access from the browser. Typing, image gen, and TTS playback are 
+# unaffected. A TLS-terminating reverse proxy (Traefik/Caddy) in front of 
+# this will solve that issue

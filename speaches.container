@@ -1,0 +1,19 @@
+[Unit]
+Description=speaches - OpenAI-compatible STT/TTS server (CPU)
+After=ai-stack-network.service
+
+[Container]
+Image=ghcr.io/speaches-ai/speaches:latest-cpu
+AutoUpdate=registry
+ContainerName=speaches
+Network=ai-stack.network
+
+Volume=%h/ai-stack/speaches:/home/ubuntu/.cache/huggingface/hub:Z
+
+PublishPort=8000:8000
+
+[Service]
+Restart=always
+
+# [Install]
+# WantedBy=default.target

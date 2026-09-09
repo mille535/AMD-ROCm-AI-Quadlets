@@ -1,0 +1,3 @@
+[Network]
+# Custom bridge network so containers can resolve each other by name
+# (the default rootless podman network doesn't do this).

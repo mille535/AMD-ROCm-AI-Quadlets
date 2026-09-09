@@ -1,0 +1,32 @@
+[Unit]
+Description=Ollama LLM inference server
+After=ai-stack-network.service
+
+[Container]
+Image=docker.io/ollama/ollama:rocm
+AutoUpdate=registry
+ContainerName=ollama
+Network=ai-stack.network
+
+AddDevice=/dev/kfd
+AddDevice=/dev/dri
+GroupAdd=keep-groups
+SecurityLabelDisable=true
+
+Environment="OLLAMA_FLASH_ATTENTION=1"
+Environment="OLLAMA_KV_CACHE_TYPE=q8_0"
+Environment="OLLAMA_NUM_PARALLEL=1"
+Environment="OLLAMA_MAX_LOADED_MODELS=1"
+Environment="OLLAMA_KEEP_ALIVE=4h"
+
+# --- Bind mounts (persistent storage) ---
+Volume=%h/ai-stack/ollama:/root/.ollama:Z
+
+PublishPort=11434:11434
+
+[Service]
+Restart=always
+TimeoutStartSec=120
+
+# [Install]
+# WantedBy=default.target
