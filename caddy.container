@@ -8,10 +8,10 @@ AutoUpdate=registry
 ContainerName=caddy
 Network=ai-stack.network
 
-# Domain suffix used by the Caddyfile (each service gets its own subdomain,
-# e.g. open-webui.ai-stack.internal). Change this to whatever you point your
-# client devices' DNS/hosts entries at. See README.md > Reverse proxy
-# (Caddy) for DNS setup.
+# Domain suffix used by the Caddyfile's LAN-only fallback blocks (each
+# service gets its own subdomain, e.g. open-webui.ai-stack.internal).
+# Change this to whatever you point your client devices' DNS/hosts entries
+# at. See README.md > Reverse proxy (Caddy) for DNS setup.
 Environment=DOMAIN_SUFFIX=ai-stack.internal
 
 Volume=%h/ai-stack/caddy/Caddyfile:/etc/caddy/Caddyfile:Z,ro
@@ -27,6 +27,21 @@ Volume=%h/ai-stack/caddy/config:/config:Z
 PublishPort=8080:80
 PublishPort=8443:443
 PublishPort=8443:443/udp
+
+# --- Tailscale access (optional, recommended) -------------------------------
+# Real, trusted certs via Tailscale's HTTPS feature instead of the
+# self-signed LAN fallback above — works from this machine, any device on
+# your tailnet, and remotely, with no browser trust warnings. Uncomment
+# these once you've generated a cert with `tailscale cert` (see README.md >
+# Reverse proxy (Caddy)) and uncomment the matching blocks in the Caddyfile.
+#
+# Environment=TAILSCALE_HOSTNAME=myhost.tailnet-name.ts.net
+# Volume=%h/ai-stack/caddy/tailscale:/tailscale-certs:Z,ro
+# PublishPort=9443:9443
+# PublishPort=9444:9444
+# PublishPort=9445:9445
+# PublishPort=9446:9446
+# PublishPort=9447:9447
 
 [Service]
 Restart=always
