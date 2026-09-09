@@ -33,10 +33,12 @@ Quadlet files are picked up from `~/.config/containers/systemd/` for rootless (p
 ```bash
 mkdir -p ~/.config/containers/systemd
 cp *.network *.container ~/.config/containers/systemd/
-mkdir -p ~/ai-stack/caddy
+mkdir -p ~/ai-stack/caddy/data ~/ai-stack/caddy/config
 cp -r caddy/* ~/ai-stack/caddy/
 systemctl --user daemon-reload
 ```
+
+`caddy`'s `data/` and `config/` directories must exist before its first start — unlike the other services' data directories, Podman won't create them on its own, and Caddy fails to start without them.
 
 Start the stack (the network and `After=` ordering handle dependencies):
 
@@ -78,6 +80,8 @@ Then restart: `systemctl --user restart searxng.service`
 ## Reverse proxy (Caddy)
 
 `caddy.container` puts each service behind HTTPS, using the `Caddyfile` at `~/ai-stack/caddy/Caddyfile`. This is what makes microphone input work from devices other than `localhost` (see the note above). Two access paths are defined; pick whichever matches how you connect, or run both:
+
+Caddy doesn't require any of the backend services to be running — it only orders after `ai-stack.network`. You can run `caddy.service` with just a subset of the stack started (e.g. only `ollama`); routes to services that aren't up simply return an error until you start them.
 
 | | Tailscale (recommended) | LAN-only fallback |
 |---|---|---|
@@ -178,6 +182,29 @@ Then import `ai-stack-root-ca.crt` into your OS/browser trust store on each devi
 
 Once DNS is set up, reach the stack at `https://open-webui.ai-stack.internal:8443` (or whichever port you published — see [Ports](#ports)).
 
+### Serving on the standard ports (80/443)
+
+Caddy's LAN-fallback listeners are published on `8080`/`8443` by default (see [Ports](#ports)) rather than `80`/`443`, since rootless Podman usually can't bind ports below 1024 directly. Two ways to get plain `https://open-webui.ai-stack.internal` (no `:8443`) instead, without changing anything in `caddy.container` itself:
+
+**Option A — firewall port forwarding (recommended).** If you're running `firewalld` (Fedora, RHEL, etc.), forward the standard ports down to Caddy's published ones:
+
+```bash
+sudo firewall-cmd --add-forward-port=port=80:proto=tcp:toport=8080
+sudo firewall-cmd --add-forward-port=port=443:proto=tcp:toport=8443
+sudo firewall-cmd --add-forward-port=port=443:proto=udp:toport=8443
+sudo firewall-cmd --runtime-to-permanent
+```
+
+This only affects traffic arriving from other machines — connections from the host itself still need `:8080`/`:8443` (or `localhost`), since firewalld's forwarding doesn't apply to loopback traffic. It's also scoped to just these two ports, unlike option B below.
+
+**Option B — lower the unprivileged port floor**, letting Podman bind `80`/`443` directly:
+
+```bash
+sudo sysctl -w net.ipv4.ip_unprivileged_port_start=80
+```
+
+Then change `caddy.container`'s `PublishPort=8080:80` / `8443:443` (and the `/udp` line) to `PublishPort=80:80` / `443:443`, and run `systemctl --user daemon-reload && systemctl --user restart caddy.service`. This lowers the port floor for every rootless process on the host, not just Caddy — option A is usually the better-scoped choice.
+
 ## Starting at boot
 
 By default these units have no `[Install]` section, so `systemctl --user enable` has nothing to hook into — they're meant to be started manually or pulled in as dependencies. To have systemd start them automatically at boot:
@@ -256,7 +283,7 @@ A couple of things worth knowing:
 
 ### Data locations
 
-All persistent data lives under `~/ai-stack/`, bind-mounted into the containers. These directories are created automatically on first start; back them up if you want to preserve chat history, models, or generated images.
+All persistent data lives under `~/ai-stack/`, bind-mounted into the containers. Most of these directories are created automatically on first start; back them up if you want to preserve chat history, models, or generated images.
 
 | Path | Contents |
 |---|---|
@@ -265,7 +292,7 @@ All persistent data lives under `~/ai-stack/`, bind-mounted into the containers.
 | `~/ai-stack/open-webui` | Open WebUI database/config |
 | `~/ai-stack/searxng` | SearXNG config (`settings.yml`) |
 | `~/ai-stack/speaches` | Cached Hugging Face STT/TTS models |
-| `~/ai-stack/caddy` | `Caddyfile`, plus `data/` (certs, the local CA) and `config/` (Caddy's runtime config) created on first start |
+| `~/ai-stack/caddy` | `Caddyfile` (from this repo's `caddy/` folder), plus `data/` (certs, the local CA) and `config/` (Caddy's runtime config) — **`data/` and `config/` must be created manually before first start** (see [Installation](#installation)); Caddy won't start without them |
 | `~/ai-stack/caddy/tailscale` | Tailscale-issued cert/key (`tailscale.crt`/`.key`) — only if using the [Tailscale access path](#tailscale-access-recommended) |
 
 ### Ports
