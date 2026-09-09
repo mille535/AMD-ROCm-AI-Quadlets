@@ -16,9 +16,6 @@ SecurityLabelDisable=true
 SeccompProfile=unconfined
 AddCapability=CAP_SYS_PTRACE
 
-Environment=HSA_OVERRIDE_GFX_VERSION=12.0.1
-# Environment=CLI_ARGS=""
-
 PodmanArgs=--ipc=host
 
 Volume=%h/ai-stack/comfyui/models:/root/ComfyUI/models:Z

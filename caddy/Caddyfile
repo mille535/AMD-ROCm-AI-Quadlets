@@ -1,0 +1,37 @@
+# Reverse proxy for the AI stack, one subdomain per service.
+#
+# {$DOMAIN_SUFFIX} comes from the Environment= line in caddy.container
+# (defaults to ai-stack.internal). Point your client devices at this host
+# for each subdomain below — either per-device /etc/hosts entries or a
+# local DNS server (dnsmasq, Pi-hole, etc.) — see README.md > Reverse
+# proxy (Caddy).
+#
+# `tls internal` makes Caddy mint its own local CA and self-signed certs,
+# since these aren't publicly resolvable domains that Let's Encrypt could
+# issue for. Browsers will show a one-time trust warning per device unless
+# you import Caddy's root CA (see README.md).
+
+open-webui.{$DOMAIN_SUFFIX} {
+	tls internal
+	reverse_proxy open-webui:8080
+}
+
+ollama.{$DOMAIN_SUFFIX} {
+	tls internal
+	reverse_proxy ollama:11434
+}
+
+comfyui.{$DOMAIN_SUFFIX} {
+	tls internal
+	reverse_proxy comfyui:8188
+}
+
+searxng.{$DOMAIN_SUFFIX} {
+	tls internal
+	reverse_proxy searxng:8080
+}
+
+speaches.{$DOMAIN_SUFFIX} {
+	tls internal
+	reverse_proxy speaches:8000
+}

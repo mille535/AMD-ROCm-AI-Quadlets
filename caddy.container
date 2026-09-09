@@ -1,0 +1,35 @@
+[Unit]
+Description=Caddy reverse proxy (HTTPS for the AI stack)
+After=ai-stack-network.service ollama.service open-webui.service comfyui.service searxng.service speaches.service
+
+[Container]
+Image=docker.io/library/caddy:2-alpine
+AutoUpdate=registry
+ContainerName=caddy
+Network=ai-stack.network
+
+# Domain suffix used by the Caddyfile (each service gets its own subdomain,
+# e.g. open-webui.ai-stack.internal). Change this to whatever you point your
+# client devices' DNS/hosts entries at. See README.md > Reverse proxy
+# (Caddy) for DNS setup.
+Environment=DOMAIN_SUFFIX=ai-stack.internal
+
+Volume=%h/ai-stack/caddy/Caddyfile:/etc/caddy/Caddyfile:Z,ro
+Volume=%h/ai-stack/caddy/data:/data:Z
+Volume=%h/ai-stack/caddy/config:/config:Z
+
+# Published on 8080/8443 by default so this works out of the box under
+# rootless Podman (binding host ports below 1024 usually needs
+# net.ipv4.ip_unprivileged_port_start lowered first). To serve on the
+# standard 80/443 instead:
+#   sudo sysctl -w net.ipv4.ip_unprivileged_port_start=80
+# then change these to PublishPort=80:80 / 443:443 (and 443:443/udp).
+PublishPort=8080:80
+PublishPort=8443:443
+PublishPort=8443:443/udp
+
+[Service]
+Restart=always
+
+# [Install]
+# WantedBy=default.target
