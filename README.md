@@ -2,7 +2,9 @@
 
 Podman Quadlet unit files for running a self-hosted AI stack on AMD GPUs via ROCm. Everything runs rootless under `systemd --user`, with a shared bridge network so the containers can reach each other by name.
 
-**Contents:** [What's in the stack](#whats-in-the-stack) · [Requirements](#requirements) · [Installation](#installation) · [Post-install configuration](#post-install-configuration) · [Reverse proxy (Caddy)](#reverse-proxy-caddy) ([Tailscale](#tailscale-access-recommended) · [LAN fallback](#lan-only-fallback)) · [Starting at boot](#starting-at-boot) · [Automatic image updates](#automatic-image-updates-podman-auto-update) · [Reference](#reference) · [Tuning for your GPU](#tuning-for-your-gpu) · [Roadmap](#roadmap) · [License](#license)
+> **Security warning:** This stack is meant for your home network and/or a private [Tailscale](https://tailscale.com/) network — not the public internet. None of these services (Ollama, ComfyUI, SearXNG, speaches) have their own authentication, and Open WebUI's login is not a substitute for real hardening. Do **not** port-forward any of these ports on your router, and do **not** use `tailscale funnel` (which does publish to the internet) with this setup. See [Remote access](#remote-access) for the supported ways to reach this stack from elsewhere.
+
+**Contents:** [What's in the stack](#whats-in-the-stack) · [Requirements](#requirements) · [Installation](#installation) · [Post-install configuration](#post-install-configuration) · [Remote access](#remote-access) ([Tailscale](#tailscale-access) · [LAN-only](#lan-only-access)) · [Starting at boot](#starting-at-boot) · [Automatic image updates](#automatic-image-updates-podman-auto-update) · [Reference](#reference) · [Tuning for your GPU](#tuning-for-your-gpu) · [Roadmap](#roadmap) · [License](#license)
 
 ## What's in the stack
 
@@ -14,7 +16,6 @@ Podman Quadlet unit files for running a self-hosted AI stack on AMD GPUs via ROC
 | `comfyui.container` | `yanwk/comfyui-boot:rocm7` | Image generation backend, GPU-accelerated via ROCm |
 | `searxng.container` | `searxng/searxng:latest` | Self-hosted search engine, used as Open WebUI's web search backend |
 | `speaches.container` | `speaches-ai/speaches:latest-cpu` | OpenAI-compatible STT/TTS server, used by Open WebUI for voice input/output |
-| `caddy.container` | `caddy:2-alpine` | Reverse proxy — puts every service behind HTTPS, via Tailscale or a LAN-only subdomain, see [Reverse proxy (Caddy)](#reverse-proxy-caddy) |
 
 > **Note:** `speaches` currently runs on CPU, not ROCm. It's likely to be swapped out for a hardware-accelerated STT/TTS service in a future update — see [Roadmap](#roadmap).
 
@@ -33,12 +34,8 @@ Quadlet files are picked up from `~/.config/containers/systemd/` for rootless (p
 ```bash
 mkdir -p ~/.config/containers/systemd
 cp *.network *.container ~/.config/containers/systemd/
-mkdir -p ~/ai-stack/caddy/data ~/ai-stack/caddy/config
-cp -r caddy/* ~/ai-stack/caddy/
 systemctl --user daemon-reload
 ```
-
-`caddy`'s `data/` and `config/` directories must exist before its first start — unlike the other services' data directories, Podman won't create them on its own, and Caddy fails to start without them.
 
 Start the stack (the network and `After=` ordering handle dependencies):
 
@@ -48,7 +45,6 @@ systemctl --user start searxng.service
 systemctl --user start speaches.service
 systemctl --user start comfyui.service
 systemctl --user start open-webui.service
-systemctl --user start caddy.service
 ```
 
 Check status and logs the usual systemd way:
@@ -75,135 +71,42 @@ Then restart: `systemctl --user restart searxng.service`
 
 **Open WebUI image generation** — the `COMFYUI_WORKFLOW` (API-format JSON) and node-ID mappings still need to be configured once through Admin Panel > Settings > Images in the Open WebUI UI.
 
-**Microphone input** — browser mic access for Open WebUI's STT only works over HTTPS or from `localhost`. Plain `http://<host-ip>:3000` from other devices on your network won't get mic permission (typing, image generation, and TTS playback still work fine). The `caddy` service fixes this — see [Reverse proxy (Caddy)](#reverse-proxy-caddy) below.
+**Microphone input** — browser mic access for Open WebUI's STT only works over HTTPS or from `localhost`. Plain `http://<host-ip>:3000` from other devices on your network won't get mic permission (typing, image generation, and TTS playback still work fine). See [Remote access](#remote-access) below — the Tailscale path fixes this; the LAN-only path doesn't.
 
-## Reverse proxy (Caddy)
+## Remote access
 
-`caddy.container` puts each service behind HTTPS, using the `Caddyfile` at `~/ai-stack/caddy/Caddyfile`. This is what makes microphone input work from devices other than `localhost` (see the note above). Two access paths are defined; pick whichever matches how you connect, or run both:
+No reverse proxy is required to reach these services from another machine — see the two options below. Whichever you use, keep the [security warning](#amd-rocm-ai-quadlets) above in mind: neither option adds authentication, they just control *who can reach the network* the services sit on.
 
-Caddy doesn't require any of the backend services to be running — it only orders after `ai-stack.network`. You can run `caddy.service` with just a subset of the stack started (e.g. only `ollama`); routes to services that aren't up simply return an error until you start them.
+### Tailscale access
 
-| | Tailscale (recommended) | LAN-only fallback |
-|---|---|---|
-| Certs | Real, publicly-trusted (via `tailscale cert`) | Self-signed (via `tls internal`) |
-| Browser warnings | None | One-time warning per device, unless you import the CA |
-| Reachable from | This machine, any tailnet device, remotely | This LAN only |
-| Addressing | One hostname, one port per service | One subdomain per service |
-| Setup effort | Requires Tailscale with HTTPS certs enabled | Works with just this repo |
+Use [`tailscale serve`](https://tailscale.com/kb/1242/tailscale-serve) — a reverse proxy built into `tailscaled` itself, so no extra container or config file is needed. It terminates HTTPS using Tailscale's own auto-renewing MagicDNS certificate and forwards to a local port, and stays **tailnet-only**: only devices logged into your tailnet can reach it. Its sibling command, `tailscale funnel`, publishes to the public internet instead — don't use that here.
 
-Both sets of Caddy site blocks ship commented out except the LAN fallback, which is active by default so the stack has working HTTPS out of the box.
+Each service is served on its own port, `10000` higher than the port it normally listens on (see [Ports](#ports)) — an offset chosen so the mapping is easy to remember, and because `tailscale serve` can't reuse a port a service is already listening on for LAN access.
 
-### Tailscale access (recommended)
-
-Tailscale's HTTPS certs feature issues your device a real Let's Encrypt certificate for its MagicDNS name — no browser warnings, and it works from the host itself, any other device on your tailnet, or remotely, with no port-forwarding or DNS setup of your own.
-
-1. **Enable HTTPS certs** for your tailnet in the [Tailscale admin console](https://login.tailscale.com/admin/dns) (DNS tab → enable "HTTPS Certificates"), if you haven't already.
+1. **Enable HTTPS certs** for your tailnet, once, in the [Tailscale admin console](https://login.tailscale.com/admin/dns) (DNS tab → "HTTPS Certificates"), if you haven't already.
 2. **Find your MagicDNS hostname:** `tailscale status --self` (it looks like `myhost.tailnet-name.ts.net`).
-3. **Generate the cert** on the host (not inside the container — `tailscale` isn't part of this stack, it's assumed to already be installed and logged in on the host):
+3. **Serve each service you want reachable this way:**
    ```bash
-   mkdir -p ~/ai-stack/caddy/tailscale
-   sudo tailscale cert \
-     --cert-file ~/ai-stack/caddy/tailscale/tailscale.crt \
-     --key-file  ~/ai-stack/caddy/tailscale/tailscale.key \
-     myhost.tailnet-name.ts.net
-   sudo chown "$USER" ~/ai-stack/caddy/tailscale/tailscale.*
+   sudo tailscale serve --bg --https=13000 http://127.0.0.1:3000     # Open WebUI
+   sudo tailscale serve --bg --https=21434 http://127.0.0.1:11434    # Ollama
+   sudo tailscale serve --bg --https=18188 http://127.0.0.1:8188     # ComfyUI
+   sudo tailscale serve --bg --https=18080 http://127.0.0.1:8080     # SearXNG
+   sudo tailscale serve --bg --https=18000 http://127.0.0.1:8000     # speaches
    ```
-4. **Uncomment the Tailscale lines** in `caddy.container` (`Environment=TAILSCALE_HOSTNAME=`, the `tailscale-certs` volume, and the five `PublishPort` lines) and set `TAILSCALE_HOSTNAME` to the hostname from step 2.
-5. **Uncomment the matching site blocks** (section 1) in `~/ai-stack/caddy/Caddyfile` — only uncomment the ones for services you actually want exposed this way, e.g. just `open-webui` if that's the only one you need mic access for.
-6. **Reload and restart:**
-   ```bash
-   systemctl --user daemon-reload
-   systemctl --user restart caddy.service
-   ```
+   You don't have to run all five — only serve the ones you actually want to reach remotely, e.g. Open WebUI & ComfyUI.
 
-Since a single Tailscale device only gets one hostname (not per-service subdomains), each service gets its own port instead, all sharing the same cert:
+Reach a service at `https://myhost.tailnet-name.ts.net:<port>` from any device on your tailnet — for example `https://myhost.tailnet-name.ts.net:13000` for Open WebUI.
 
-| Service | Tailscale URL |
-|---|---|
-| Open WebUI | `https://<hostname>:9443` |
-| Ollama | `https://<hostname>:9444` |
-| ComfyUI | `https://<hostname>:9445` |
-| SearXNG | `https://<hostname>:9446` |
-| speaches | `https://<hostname>:9447` |
-
-**Renewal:** Tailscale certs expire like any Let's Encrypt cert (~90 days). Re-run the `tailscale cert` command from step 3 periodically to renew — Caddy picks up the updated files automatically. A `systemd --user` timer keeps this hands-off:
-
-```ini
-# ~/.config/systemd/user/tailscale-cert-renew.service
-[Unit]
-Description=Renew Tailscale cert for Caddy
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/sudo /usr/bin/tailscale cert --cert-file %h/ai-stack/caddy/tailscale/tailscale.crt --key-file %h/ai-stack/caddy/tailscale/tailscale.key myhost.tailnet-name.ts.net
-```
-
-```ini
-# ~/.config/systemd/user/tailscale-cert-renew.timer
-[Unit]
-Description=Weekly Tailscale cert renewal check
-
-[Timer]
-OnCalendar=weekly
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
+Check what's currently being served, or remove one:
 
 ```bash
-systemctl --user daemon-reload
-systemctl --user enable --now tailscale-cert-renew.timer
+tailscale serve status
+sudo tailscale serve --https=21434 off
 ```
 
-(`sudo tailscale cert` needs passwordless sudo for that one command — add a narrow `NOPASSWD` rule in `/etc/sudoers.d/` for it, rather than for `sudo` in general.)
+### LAN-only access
 
-### LAN-only fallback
-
-For devices that aren't on your tailnet, section 2 of the Caddyfile (active by default) puts each service behind its own subdomain — `open-webui.ai-stack.internal`, `ollama.ai-stack.internal`, etc. — using Caddy's `tls internal` to mint a self-signed cert from its own local CA, since there's no public domain here for Let's Encrypt to issue against.
-
-**1. Pick a domain suffix.** The default is `ai-stack.internal` (`.internal` is a TLD ICANN has reserved for private-network use, so it won't collide with a real domain). Change it by editing `Environment=DOMAIN_SUFFIX=` in `caddy.container` — it's read by every LAN-fallback site block, so one edit covers all services.
-
-**2. Point your devices at it.** These subdomains aren't publicly resolvable, so each client device needs to resolve them to this host's LAN IP — either:
-
-- Per-device `/etc/hosts` (or Windows `hosts`) entries, e.g.:
-  ```
-  192.168.1.50   open-webui.ai-stack.internal ollama.ai-stack.internal comfyui.ai-stack.internal searxng.ai-stack.internal speaches.ai-stack.internal
-  ```
-- A local DNS server (dnsmasq, Pi-hole, etc.) with a wildcard record for `*.ai-stack.internal` → this host's LAN IP, which avoids editing every device individually.
-
-**3. Trust the certificate (optional).** Browsers will show a one-time security warning per device/hostname; clicking through is enough for HTTPS features (including mic access) to work. To avoid the warning entirely, export Caddy's root CA and install it as a trusted certificate on your client devices:
-
-```bash
-podman cp caddy:/data/caddy/pki/authorities/local/root.crt ./ai-stack-root-ca.crt
-```
-
-Then import `ai-stack-root-ca.crt` into your OS/browser trust store on each device.
-
-Once DNS is set up, reach the stack at `https://open-webui.ai-stack.internal:8443` (or whichever port you published — see [Ports](#ports)).
-
-### Serving on the standard ports (80/443)
-
-Caddy's LAN-fallback listeners are published on `8080`/`8443` by default (see [Ports](#ports)) rather than `80`/`443`, since rootless Podman usually can't bind ports below 1024 directly. Two ways to get plain `https://open-webui.ai-stack.internal` (no `:8443`) instead, without changing anything in `caddy.container` itself:
-
-**Option A — firewall port forwarding (recommended).** If you're running `firewalld` (Fedora, RHEL, etc.), forward the standard ports down to Caddy's published ones:
-
-```bash
-sudo firewall-cmd --add-forward-port=port=80:proto=tcp:toport=8080
-sudo firewall-cmd --add-forward-port=port=443:proto=tcp:toport=8443
-sudo firewall-cmd --add-forward-port=port=443:proto=udp:toport=8443
-sudo firewall-cmd --runtime-to-permanent
-```
-
-This only affects traffic arriving from other machines — connections from the host itself still need `:8080`/`:8443` (or `localhost`), since firewalld's forwarding doesn't apply to loopback traffic. It's also scoped to just these two ports, unlike option B below.
-
-**Option B — lower the unprivileged port floor**, letting Podman bind `80`/`443` directly:
-
-```bash
-sudo sysctl -w net.ipv4.ip_unprivileged_port_start=80
-```
-
-Then change `caddy.container`'s `PublishPort=8080:80` / `8443:443` (and the `/udp` line) to `PublishPort=80:80` / `443:443`, and run `systemctl --user daemon-reload && systemctl --user restart caddy.service`. This lowers the port floor for every rootless process on the host, not just Caddy — option A is usually the better-scoped choice.
+For devices on your LAN, each service is reachable directly on its own port (`http://<host-ip>:<port>` — see [Ports](#ports)); nothing extra to set up. This is plain HTTP, so Open WebUI's microphone input isn't available this way (see the note above) — if you need that from a LAN device, put it on your tailnet and use [Tailscale access](#tailscale-access) instead.
 
 ## Starting at boot
 
@@ -216,13 +119,13 @@ By default these units have no `[Install]` section, so `systemctl --user enable`
    WantedBy=default.target
    ```
 
-   Do this for `ollama.container`, `searxng.container`, `speaches.container`, `comfyui.container`, `open-webui.container`, and `caddy.container` (leave `ai-stack.network` alone — it doesn't need `[Install]`; it's pulled in automatically by any container that references it).
+   Do this for `ollama.container`, `searxng.container`, `speaches.container`, `comfyui.container`, and `open-webui.container` (leave `ai-stack.network` alone — it doesn't need `[Install]`; it's pulled in automatically by any container that references it).
 
 2. **Reload and enable each service:**
 
    ```bash
    systemctl --user daemon-reload
-   systemctl --user enable ollama.service searxng.service speaches.service comfyui.service open-webui.service caddy.service
+   systemctl --user enable ollama.service searxng.service speaches.service comfyui.service open-webui.service
    ```
 
 3. **Enable lingering** for your user, so `systemd --user` (and these services) start at boot even before you log in:
@@ -236,7 +139,7 @@ By default these units have no `[Install]` section, so `systemctl --user enable`
 After a reboot, confirm everything came up:
 
 ```bash
-systemctl --user status ollama.service open-webui.service comfyui.service searxng.service speaches.service caddy.service
+systemctl --user status ollama.service open-webui.service comfyui.service searxng.service speaches.service
 ```
 
 ## Automatic image updates (podman auto-update)
@@ -283,7 +186,7 @@ A couple of things worth knowing:
 
 ### Data locations
 
-All persistent data lives under `~/ai-stack/`, bind-mounted into the containers. Most of these directories are created automatically on first start; back them up if you want to preserve chat history, models, or generated images.
+All persistent data lives under `~/ai-stack/`, bind-mounted into the containers. These directories are created automatically on first start; back them up if you want to preserve chat history, models, or generated images.
 
 | Path | Contents |
 |---|---|
@@ -292,22 +195,18 @@ All persistent data lives under `~/ai-stack/`, bind-mounted into the containers.
 | `~/ai-stack/open-webui` | Open WebUI database/config |
 | `~/ai-stack/searxng` | SearXNG config (`settings.yml`) |
 | `~/ai-stack/speaches` | Cached Hugging Face STT/TTS models |
-| `~/ai-stack/caddy` | `Caddyfile` (from this repo's `caddy/` folder), plus `data/` (certs, the local CA) and `config/` (Caddy's runtime config) — **`data/` and `config/` must be created manually before first start** (see [Installation](#installation)); Caddy won't start without them |
-| `~/ai-stack/caddy/tailscale` | Tailscale-issued cert/key (`tailscale.crt`/`.key`) — only if using the [Tailscale access path](#tailscale-access-recommended) |
 
 ### Ports
 
-| Service | Port |
-|---|---|
-| Ollama | `11434` |
-| Open WebUI | `3000` (proxies to container port `8080`) |
-| ComfyUI | `8188` |
-| SearXNG | `8080` |
-| speaches | `8000` |
-| Caddy (LAN fallback) | `8080` → HTTP (container port `80`), `8443` → HTTPS (container port `443`, TCP+UDP/HTTP3) |
-| Caddy (Tailscale, optional) | `9443`–`9447` → one HTTPS port per service, see [Tailscale access](#tailscale-access-recommended) |
+| Service | Port | Tailscale HTTPS port |
+|---|---|---|
+| Ollama | `11434` | `21434` |
+| Open WebUI | `3000` (proxies to container port `8080`) | `13000` |
+| ComfyUI | `8188` | `18188` |
+| SearXNG | `8080` | `18080` |
+| speaches | `8000` | `18000` |
 
-Every service above is also reachable directly on its own port — Caddy in front of them is optional and only needed for HTTPS/subdomains (see [Reverse proxy (Caddy)](#reverse-proxy-caddy)).
+The Tailscale HTTPS column only applies if you've set up [Tailscale access](#tailscale-access) — see that section for details. See [Remote access](#remote-access) generally for reaching these over Tailscale or your LAN.
 
 ## Tuning for your GPU
 
@@ -341,7 +240,6 @@ If ROCm fails to detect or initialize the GPU inside a container, an arch-spoofi
 ## Roadmap
 
 - Replace `speaches` (currently CPU-only) with a hardware-accelerated STT/TTS service once the ROCm crash bug is resolved upstream or a suitable alternative is found.
-- Automate local DNS resolution for the `*.ai-stack.internal` hostnames (currently requires manual `/etc/hosts` entries or a self-run DNS server).
 
 ## License
 
