@@ -1,6 +1,6 @@
 [Unit]
 Description=Open WebUI - chat hub (LLM, search, images, voice)
-After=ai-stack-network.service ollama.service searxng.service speaches.service
+After=ai-stack-network.service ollama.service searxng.service whisper.service docling.service
 
 [Container]
 Image=ghcr.io/open-webui/open-webui:main
@@ -8,31 +8,48 @@ AutoUpdate=registry
 ContainerName=open-webui
 Network=ai-stack.network
 
+# Change if running behind reverse proxy or tailscale serve
 Environment=OLLAMA_BASE_URL=http://ollama:11434
+
+# Logging can be useful for troubleshooting
 # Environment=GLOBAL_LOG_LEVEL=DEBUG
 
+# Web search settings
 Environment=ENABLE_WEB_SEARCH=true
 Environment=WEB_SEARCH_ENGINE=searxng
-Environment=WEB_SEARCH_RESULT_COUNT=3
-Environment=WEB_SEARCH_CONCURRENT_REQUESTS=10
 Environment=SEARXNG_QUERY_URL=http://searxng:8080/search?q=<query>
 
+# Image gen Settings
 Environment=ENABLE_IMAGE_GENERATION=true
 Environment=IMAGE_GENERATION_ENGINE=comfyui
+Environment=ENABLE_IMAGE_PROMPT_GENERATION=true
 Environment=COMFYUI_BASE_URL=http://comfyui:8188
-# COMFYUI_WORKFLOW (API-format JSON) and the node-ID mappings still need to
-# be set up once through Admin Panel > Settings > Images — see prior message.
+Environment=IMAGE_SIZE=1024x1024
+Environment=IMAGE_STEPS=9
+Environment=IMAGE_GENERATION_MODEL=z_image_turbo_bf16.safetensors
+Environment="COMFYUI_WORKFLOW={\"1\":{\"class_type\":\"UNETLoader\",\"inputs\":{\"unet_name\":\"z_image_turbo_bf16.safetensors\",\"weight_dtype\":\"default\"}},\"2\":{\"class_type\":\"CLIPLoader\",\"inputs\":{\"clip_name\":\"qwen_3_4b.safetensors\",\"type\":\"lumina2\",\"device\":\"default\"}},\"3\":{\"class_type\":\"VAELoader\",\"inputs\":{\"vae_name\":\"ae.safetensors\"}},\"4\":{\"class_type\":\"ModelSamplingAuraFlow\",\"inputs\":{\"model\":[\"1\",0],\"shift\":3}},\"5\":{\"class_type\":\"CLIPTextEncode\",\"inputs\":{\"text\":\"A photo of a red fox sitting in a snowy forest at golden hour\",\"clip\":[\"2\",0]}},\"6\":{\"class_type\":\"ConditioningZeroOut\",\"inputs\":{\"conditioning\":[\"5\",0]}},\"7\":{\"class_type\":\"EmptySD3LatentImage\",\"inputs\":{\"width\":1024,\"height\":1024,\"batch_size\":1}},\"8\":{\"class_type\":\"KSampler\",\"inputs\":{\"model\":[\"4\",0],\"seed\":42,\"steps\":9,\"cfg\":1,\"sampler_name\":\"res_multistep\",\"scheduler\":\"simple\",\"positive\":[\"5\",0],\"negative\":[\"6\",0],\"latent_image\":[\"7\",0],\"denoise\":1}},\"9\":{\"class_type\":\"VAEDecode\",\"inputs\":{\"samples\":[\"8\",0],\"vae\":[\"3\",0]}},\"10\":{\"class_type\":\"SaveImage\",\"inputs\":{\"filename_prefix\":\"zimage\",\"images\":[\"9\",0]}}}"
+Environment="COMFYUI_WORKFLOW_NODES=[{\"type\":\"prompt\",\"node_ids\":[\"5\"],\"key\":\"text\"},{\"type\":\"model\",\"node_ids\":[\"1\"],\"key\":\"unet_name\"},{\"type\":\"width\",\"node_ids\":[\"7\"],\"key\":\"width\"},{\"type\":\"height\",\"node_ids\":[\"7\"],\"key\":\"height\"},{\"type\":\"n\",\"node_ids\":[\"7\"],\"key\":\"batch_size\"},{\"type\":\"steps\",\"node_ids\":[\"8\"],\"key\":\"steps\"},{\"type\":\"seed\",\"node_ids\":[\"8\"],\"key\":\"seed\"}]"
 
-# Environment=AUDIO_STT_ENGINE=openai
-Environment=AUDIO_STT_OPENAI_API_BASE_URL=http://speaches:8000/v1
-Environment=AUDIO_STT_OPENAI_API_KEY=not-needed
-Environment=AUDIO_STT_MODEL=Systran/faster-whisper-small
+# speech to text settings
+Environment=AUDIO_STT_ENGINE=openai
+Environment=AUDIO_STT_OPENAI_API_BASE_URL=http://whisper:8001/v1
+Environment=AUDIO_STT_OPENAI_API_KEY=none
+Environment=AUDIO_STT_MODEL=whisper-1
 
-Environment=AUDIO_TTS_ENGINE=openai
-Environment=AUDIO_TTS_OPENAI_API_BASE_URL=http://speaches:8000/v1
-Environment=AUDIO_TTS_OPENAI_API_KEY=not-needed
-Environment=AUDIO_TTS_MODEL=speaches-ai/Kokoro-82M-v1.0-ONNX
-Environment=AUDIO_TTS_VOICE=af_heart
+# RAG settings
+Environment=RAG_EMBEDDING_ENGINE=ollama
+Environment=RAG_EMBEDDING_MODEL=nomic-embed-text
+Environment=RAG_OLLAMA_BASE_URL=http://ollama:11434
+Environment=RAG_TEXT_SPLITTER=token
+Environment=CHUNK_SIZE=1000
+Environment=CHUNK_OVERLAP=100
+Environment=RAG_TOP_K=4
+Environment=RAG_FULL_CONTEXT=false
+
+# document extraction
+Environment=CONTENT_EXTRACTION_ENGINE=docling
+Environment=DOCLING_SERVER_URL=http://docling:5001
+Environment="DOCLING_PARAMS={\"do_ocr\":true,\"table_mode\":\"accurate\"}"
 
 Volume=%h/ai-stack/open-webui:/app/backend/data:Z
 
@@ -43,9 +60,3 @@ Restart=always
 
 # [Install]
 # WantedBy=default.target
-
-# NOTE: microphone-based STT (the mic button) only works over HTTPS or from
-# localhost — plain http://localhost:3000 from other devices will not get 
-# mic access from the browser. Typing, image gen, and TTS playback are 
-# unaffected. A TLS-terminating reverse proxy (Traefik/Caddy) in front of 
-# this will solve that issue

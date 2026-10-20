@@ -17,3 +17,13 @@ Restart=always
 
 # [Install]
 # WantedBy=default.target
+
+# NOTE: after first start, edit
+#   ~/ai-stack/searxng/settings.yml
+# and set:
+#   search:
+#     formats:
+#       - html
+#       - json
+# The JSON format is off by default; Open WebUI's SearXNG integration needs it.
+# Restart the service after editing: systemctl --user restart searxng.service

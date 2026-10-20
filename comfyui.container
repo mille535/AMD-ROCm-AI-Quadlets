@@ -10,11 +10,14 @@ Network=ai-stack.network
 
 AddDevice=/dev/kfd
 AddDevice=/dev/dri
-GroupAdd=keep-groups
+# GroupAdd=video
+# GroupAdd=render
 
 SecurityLabelDisable=true
 SeccompProfile=unconfined
 AddCapability=CAP_SYS_PTRACE
+
+# Environment=CLI_ARGS=""
 
 PodmanArgs=--ipc=host
 

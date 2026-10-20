@@ -1,0 +1,25 @@
+[Unit]
+Description=whisper.cpp server (Vulkan) - GPU-accelerated STT
+After=ai-stack-network.service
+
+[Container]
+Image=ghcr.io/ggml-org/whisper.cpp:main-vulkan
+ContainerName=whisper
+Network=ai-stack.network
+
+AddDevice=/dev/dri
+SecurityLabelDisable=true
+
+Volume=%h/ai-stack/whisper/models:/models:Z
+
+Exec=whisper-server -m /models/ggml-large-v3-turbo.bin --host 0.0.0.0 --port 8001 --inference-path /v1/audio/transcriptions
+
+PublishPort=8001:8001
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=180
+
+# [Install]
+# WantedBy=default.target

@@ -8,17 +8,25 @@ AutoUpdate=registry
 ContainerName=ollama
 Network=ai-stack.network
 
+# --- GPU passthrough (Radeon RX 9070 XT / gfx1201) ---
 AddDevice=/dev/kfd
 AddDevice=/dev/dri
-GroupAdd=keep-groups
 SecurityLabelDisable=true
 
-# Tuning for constrained VRAM / agents
+# Enable larger context for tool use. Will need to change based on model, tools, and hardware.
+Environment=OLLAMA_CONTEXT_LENGTH=16384
+
+# Flash Attention — required for KV cache quantization
 Environment="OLLAMA_FLASH_ATTENTION=1"
+
+# KV cache quantization — halves VRAM used by context, negligible quality loss
 Environment="OLLAMA_KV_CACHE_TYPE=q8_0"
+
+# Agent sessions = one deep conversation, not multi-user
 Environment="OLLAMA_NUM_PARALLEL=1"
+
+# Don't split VRAM across idle models
 Environment="OLLAMA_MAX_LOADED_MODELS=1"
-Environment="OLLAMA_KEEP_ALIVE=4h"
 
 # --- Bind mounts (persistent storage) ---
 Volume=%h/ai-stack/ollama:/root/.ollama:Z
