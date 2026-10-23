@@ -10,7 +10,7 @@ Network=ai-stack.network
 
 Volume=%h/ai-stack/searxng:/etc/searxng:Z
 
-PublishPort=8080:8080
+#PublishPort=8080:8080
 
 [Service]
 Restart=always

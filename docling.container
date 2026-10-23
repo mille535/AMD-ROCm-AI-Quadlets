@@ -11,7 +11,7 @@ Environment=DOCLING_SERVE_ENABLE_UI=true
 Environment=DOCLING_SERVE_MAX_SYNC_WAIT=600
 # Keep at 1 unless shared state (Redis) is added, otherwise "Task Not Found"
 Environment=UVICORN_WORKERS=1
-PublishPort=5001:5001
+#PublishPort=5001:5001
 
 [Service]
 Restart=always

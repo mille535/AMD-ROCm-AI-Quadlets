@@ -14,7 +14,8 @@ AddDevice=/dev/dri
 SecurityLabelDisable=true
 
 # Enable larger context for tool use. Will need to change based on model, tools, and hardware.
-Environment=OLLAMA_CONTEXT_LENGTH=16384
+# Disabled--this should be set on a model-per-model basis in openwebui
+# Environment=OLLAMA_CONTEXT_LENGTH=16384
 
 # Flash Attention — required for KV cache quantization
 Environment="OLLAMA_FLASH_ATTENTION=1"
@@ -31,7 +32,7 @@ Environment="OLLAMA_MAX_LOADED_MODELS=1"
 # --- Bind mounts (persistent storage) ---
 Volume=%h/ai-stack/ollama:/root/.ollama:Z
 
-PublishPort=11434:11434
+#PublishPort=11434:11434
 
 [Service]
 Restart=always

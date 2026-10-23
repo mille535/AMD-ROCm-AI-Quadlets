@@ -2,7 +2,7 @@
 
 Podman Quadlet unit files for running a self-hosted AI stack on an AMD GPU: chat (Ollama), web search (SearXNG), image generation (ComfyUI), GPU speech-to-text (whisper.cpp), and document RAG with OCR (Docling), all behind Open WebUI. Everything runs rootless under `systemd --user`, with a shared bridge network so the containers reach each other by name. Settings are seeded from environment variables in the unit files, so the stack can be rebuilt on another machine from this repo alone.
 
-> **Security warning:** This stack is meant for your home network and/or a private [Tailscale](https://tailscale.com/) network, not the public internet. None of these services (Ollama, ComfyUI, SearXNG, whisper, Docling) has its own authentication, and Open WebUI's login is not a substitute for real hardening. Do **not** port-forward any of these ports on your router, and do **not** use `tailscale funnel` (which publishes to the internet) with this setup. See [Remote access](#remote-access) for the supported ways to reach the stack from elsewhere.
+> **Security warning:** This stack is meant for your home network and/or a private [Tailscale](https://tailscale.com/) network, not the public internet. None of these services (Ollama, ComfyUI, SearXNG, whisper, Docling) has its own authentication, and Open WebUI's login is not a substitute for real hardening. Do **not** port-forward any of these ports on your router, and do **not** use `tailscale funnel` (which publishes to the internet) with this setup. Only Open WebUI and ComfyUI publish a host port. Ollama, SearXNG, whisper and Docling are reachable only from other containers on `ai-stack.network`. See [Remote access](#remote-access) for the supported ways to reach the rest of the stack from elsewhere.
 
 **Contents:** [What's in the stack](#whats-in-the-stack) · [Requirements](#requirements) · [Installation](#installation) · [How configuration works](#how-configuration-works) · [Verify a fresh install](#verify-a-fresh-install) · [Remote access](#remote-access) · [Starting at boot](#starting-at-boot) · [Automatic image updates](#automatic-image-updates-podman-auto-update) · [Reference](#reference) · [Tuning for your GPU](#tuning-for-your-gpu) · [Lessons learned](#lessons-learned) · [Backups](#backups) · [Roadmap](#roadmap) · [License](#license)
 
@@ -18,9 +18,11 @@ Podman Quadlet unit files for running a self-hosted AI stack on an AMD GPU: chat
 | `docling.container` | `quay.io/docling-project/docling-serve:latest` | none (CPU) | Document extraction and OCR for RAG |
 | `searxng.container` | `searxng/searxng:latest` | none | Self-hosted search engine, Open WebUI's web search backend |
 
+Only Open WebUI (`3000`) and ComfyUI (`8188`) publish a port on the host. Ollama, SearXNG, whisper and Docling are internal: Open WebUI reaches them as `http://ollama:11434`, `http://searxng:8080`, `http://whisper:8001` and `http://docling:5001`, and nothing on the host or the network can connect to them directly. See [Using the internal services directly](#using-the-internal-services-directly) if you need to.
+
 Also in the repo: `fetch-models.sh` downloads the model files the stack needs.
 
-Text-to-speech uses the browser's built-in voice; there is no TTS service. Speech-to-text uses whisper.cpp on Vulkan because faster-whisper/CTranslate2 can't use RDNA4 yet (see [Lessons learned](#lessons-learned)). Docling runs on the CPU because the project ships only CPU and NVIDIA images.
+Text-to-speech uses the browser's built-in voice; there is no TTS service. Speech-to-text uses whisper.cpp on Vulkan. Docling runs on the CPU because the project ships only CPU and NVIDIA images.
 
 ## Requirements
 
@@ -63,7 +65,13 @@ Built and tested on a Radeon RX 9070 XT (RDNA4, `gfx1201`, 16 GB VRAM) on Fedora
    systemctl --user start ollama
    ./fetch-models.sh
    ```
-   This fetches the three Z-Image files (~20 GB) into `~/ai-stack/comfyui/models/`, the whisper model into `~/ai-stack/whisper/models/`, and pulls `qwen3:14b` and `nomic-embed-text` into Ollama. It skips files already present and resumes interrupted downloads. Set `AI_STACK_DIR` to use a different base directory.
+   This fetches the three Z-Image files (~20 GB) into `~/ai-stack/comfyui/models/`, the whisper model into `~/ai-stack/whisper/models/`, and pulls `qwen3:14b` and `nomic-embed-text` into Ollama. It skips files already present and resumes interrupted downloads. Set `AI_STACK_DIR` to use a different base directory. The Ollama pulls run inside the container (`podman exec ollama ollama pull ...`), so they work even though Ollama publishes no host port.
+
+   **Optional: 64K-context Qwen3 for agent work.** Stock `qwen3:14b` is limited to 40,960 tokens of context. A modified build with a 65,536-token window is on Hugging Face at [mille535/qwen3-14b-64k-yarn](https://huggingface.co/mille535/qwen3-14b-64k-yarn). Its model card describes it as a customized Qwen3-14B (Apache-2.0) whose GGUF header carries the YaRN RoPE-scaling settings, and it was made for long agentic sessions. Pull it straight into Ollama:
+   ```bash
+   podman exec ollama ollama pull hf.co/mille535/qwen3-14b-64k-yarn
+   ```
+   Check the result with `podman exec ollama ollama ps` while a chat is running: the CONTEXT column should read `65536`. The extra context costs VRAM, so see [Resource notes](#resource-notes). `fetch-models.sh` doesn't pull this model; the script's list stays at the stock model.
 
 5. **Enable SearXNG's JSON output.** JSON is off by default but Open WebUI's search integration needs it. Start SearXNG once so it writes its config, then edit `~/ai-stack/searxng/settings.yml`:
    ```yaml
@@ -93,7 +101,6 @@ Units have no active `[Install]` section, so nothing starts at boot unless you o
 - **Environment variables in the units seed Open WebUI's settings:** web search, image generation (including the ComfyUI workflow and node mappings), RAG and embeddings, Docling, and the speech-to-text endpoint. No clicking through the admin panel is needed on a new install.
 - **Open WebUI stores these in its database after first start.** Editing `open-webui.container` later changes nothing on an existing install. Change the setting in Admin > Settings, or stop Open WebUI and clear `~/ai-stack/open-webui` to re-seed from the files (this deletes accounts and chats).
 - **JSON values** (`COMFYUI_WORKFLOW`, `COMFYUI_WORKFLOW_NODES`, `DOCLING_PARAMS`) are written as `Environment="KEY=...\"..."` lines with escaped quotes. `EnvironmentFile=` strips double quotes and breaks them, so don't move them there.
-- **Ollama's context length** is `OLLAMA_CONTEXT_LENGTH` in `ollama.container`. A per-model value set in Open WebUI overrides it.
 - **Not covered by environment variables**, so set by hand if you want them: user accounts, knowledge collections, per-model overrides, and trimming the built-in tool list on a model.
 
 ## Verify a fresh install
@@ -101,7 +108,7 @@ Units have no active `[Install]` section, so nothing starts at boot unless you o
 | Check | What to do | Expected |
 |---|---|---|
 | Chat | Send a message | Reply streams; `podman exec ollama ollama ps` shows `100% GPU` |
-| Context | Look at `ollama ps` | CONTEXT matches `OLLAMA_CONTEXT_LENGTH` |
+| Context | Look at `ollama ps` | CONTEXT matches `OLLAMA_CONTEXT_LENGTH` (or the model's own setting, e.g. `65536` for the 64K build) |
 | Web search | Enable search, ask for something current | Results cited, no 403 from SearXNG |
 | Images | Ask for a picture | Image appears; the ComfyUI log shows the job |
 | STT | Record or upload audio | Transcript appears; `journalctl --user -u whisper` shows the request. Admin > Settings > Audio should show the OpenAI engine pointing at `http://whisper:8001/v1` |
@@ -132,7 +139,7 @@ Each service is served on a port `10000` higher than its normal port (see [Ports
    sudo tailscale serve --bg --https=13000 http://127.0.0.1:3000     # Open WebUI
    sudo tailscale serve --bg --https=18188 http://127.0.0.1:8188     # ComfyUI
    ```
-   Only Open WebUI is needed for normal use, and ComfyUI if you want its own interface. The others (Ollama `11434`, SearXNG `8080`, whisper `8001`, Docling `5001`) are normally only used container to container; serve them only if you have a reason to.
+   Only Open WebUI is needed for normal use, and ComfyUI if you want its own interface. Ollama, SearXNG, whisper and Docling can't be served this way because they publish no host port; see [Using the internal services directly](#using-the-internal-services-directly).
 
 Reach a service at `https://myhost.tailnet-name.ts.net:<port>`, for example `:13000` for Open WebUI. To inspect or remove:
 
@@ -143,7 +150,7 @@ sudo tailscale serve --https=13000 off
 
 ### LAN-only access
 
-Each service is reachable directly at `http://<host-ip>:<port>` (see [Ports](#ports)); nothing extra to set up. This is plain HTTP, so mic input is unavailable. If you need it from another device, put that device on your tailnet and use Tailscale access instead.
+Open WebUI and ComfyUI are reachable directly at `http://<host-ip>:<port>` (see [Ports](#ports)); nothing extra to set up. Ollama, SearXNG, whisper and Docling are not reachable from the network. This is plain HTTP, so mic input is unavailable. If you need it from another device, put that device on your tailnet and use Tailscale access instead.
 
 ## Starting at boot
 
@@ -206,28 +213,45 @@ Docling keeps no persistent data.
 | Service | Host port | Tailscale HTTPS port (optional) |
 |---|---|---|
 | Open WebUI | `3000` (container port `8080`) | `13000` |
-| Ollama | `11434` | `21434` |
 | ComfyUI | `8188` | `18188` |
-| SearXNG | `8080` | `18080` |
-| whisper | `8001` | `18001` |
-| Docling | `5001` | `15001` |
+| Ollama | none (internal `11434`) | n/a |
+| SearXNG | none (internal `8080`) | n/a |
+| whisper | none (internal `8001`) | n/a |
+| Docling | none (internal `5001`) | n/a |
 
-The Tailscale column only applies if you set up [Tailscale access](#tailscale-access). SearXNG publishes host port 8080, so anything else you add that wants 8080 on the host needs another port.
+The Tailscale column only applies if you set up [Tailscale access](#tailscale-access).
+
+### Using the internal services directly
+
+Ollama, SearXNG, whisper and Docling publish no host port, so `curl localhost:11434` and similar won't connect. That's deliberate: they have no authentication. Options when you need them:
+
+- **Run commands inside the container**, which needs no network access:
+  ```bash
+  podman exec ollama ollama list
+  podman exec ollama ollama ps
+  ```
+- **Run another container on `ai-stack.network`**, such as an agent, and it reaches them by name (`http://ollama:11434`). Add `Network=ai-stack.network` to that container's unit.
+- **Publish a port on loopback only**, temporarily or permanently, for a host-side client. In the unit's `[Container]` section:
+  ```ini
+  PublishPort=127.0.0.1:11434:11434
+  ```
+  Then `systemctl --user daemon-reload` and restart the unit. Binding to `127.0.0.1` keeps it off the network; a bare `11434:11434` publishes it on every interface.
 
 ## Tuning for your GPU
 
 - **Device access** is covered in [Installation step 1](#installation). Ollama and ComfyUI add `/dev/kfd` and `/dev/dri`; whisper adds only `/dev/dri`.
 - **GPU not detected in a ROCm container:** an arch override may help. Set `HSA_OVERRIDE_GFX_VERSION` to a supported arch string close to your card's real target (find it with `rocminfo | grep gfx`). It isn't needed on an RX 9070 XT with ROCm 7.x, but older ROCm builds or other unsupported cards may need it.
 - **Ollama settings** (`OLLAMA_CONTEXT_LENGTH`, `OLLAMA_KV_CACHE_TYPE`, `OLLAMA_NUM_PARALLEL`, `OLLAMA_MAX_LOADED_MODELS`) are tuned for a single user and a 16 GB card. With more VRAM or several users, raise them.
-- **Different models:** change `OLLAMA_CONTEXT_LENGTH` to suit. The default of 2048 silently truncates prompts, which drops tool definitions first (see [Lessons learned](#lessons-learned)).
+- **Different models:** change `OLLAMA_CONTEXT_LENGTH` to suit. The default of 2048 silently truncates prompts, which drops tool definitions first (see [Lessons learned](#lessons-learned)). A model whose own settings define a context length (such as the 64K Qwen3 build, which sets `num_ctx 65536`) uses that instead of the server default, and a per-model value in Open WebUI overrides both.
 - **Different image model:** the ComfyUI workflow and node mappings are the `COMFYUI_*` variables in `open-webui.container`, and the files `fetch-models.sh` downloads. Change both together.
 
 ## Resource notes
 
 - This is a single-user setup by design. Ollama runs one parallel request and one loaded model so that Ollama, ComfyUI and whisper can share one GPU. Several people at once would queue.
 - The KV cache is quantized (`q8_0`, flash attention on), roughly halving the VRAM cost of context.
+- A 64K-context model needs a much larger KV cache than a 16K one. On a 16 GB card it leaves little room for anything else, so expect to unload it (or wait out the keep-alive) before generating images. Check `podman exec ollama ollama ps` to see what is loaded and how it is split between GPU and CPU.
 - A loaded chat model and ComfyUI share the same card. If images are slow right after a long chat, shorten Ollama's keep-alive (`OLLAMA_KEEP_ALIVE`).
-- Docling runs on the CPU. Scanned PDFs can take minutes, which is why `DOCLING_SERVE_MAX_SYNC_WAIT` is raised to 600. It only needs to be running when you upload documents; PDF uploads fail while it is stopped.
+- Docling runs on the CPU. Scanned PDFs can take minutes, which is why `DOCLING_SERVE_MAX_SYNC_WAIT` is raised to 600. It only needs to be running when you upload documents; PDF uploads fail while it is stopped. Its web UI (`DOCLING_SERVE_ENABLE_UI=true`) isn't reachable from the host, since the port isn't published.
 
 ## Lessons learned
 
@@ -239,6 +263,7 @@ Problems hit while building this, so they don't recur.
 - **Image Prompt Generation only works in Default function-calling mode,** not Native.
 - **The ComfyUI container needs** `SeccompProfile=unconfined`, `AddCapability=CAP_SYS_PTRACE` and `--ipc=host`.
 - **Rootless bind mounts can have the wrong owner** for images that run as a non-root user. Fix with `podman unshare chown -R <uid>:<gid> <dir>`.
+- **Port clashes:** if you publish SearXNG's port (or any other service's), a llama.cpp server or anything else defaulting to 8080 on the host will clash with it. Pick a different host port.
 
 ## Backups
 
@@ -257,7 +282,9 @@ If `tar` reports permission errors, run it under `podman unshare`. Open WebUI's 
 ## Roadmap
 
 - A higher-quality text-to-speech service in place of the browser voice.
+- Optional HTTPS in front of the LAN ports with a reverse proxy, as an alternative to Tailscale.
 
 ## License
 
 [MIT](LICENSE)
+
